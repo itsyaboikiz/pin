@@ -420,498 +420,533 @@ Workspace.DescendantAdded:Connect(function(v)
     end
 end)
 
--- BALL MANIPULATION SCRIPT
+-- BALL MANIPULATION SCRIPT (WRAPPED IN PCALL)
 local function enableBallManipulation()
-    local uis = game:GetService("UserInputService")
-    local run = game:GetService("RunService")
-    
-    local HIP_HEIGHT = 2.1
-    local HITBOX_RADIUS = 20
-    local COOLDOWN = 1.0
-    local BALL_RADIUS = 165
-    local AUTO_PULL_RADIUS = 70
-    local BOOST_FORCE = 2.5
-    local MAX_HORIZ_SPEED = 18
-    local MAX_VERT_SPEED = 28
-    local SIZE_TOLERANCE = 0.15
-    local PULL_FORCE = 4.5
-    local PULL_PREDICT = 0.25
-    
-    local JUMP_PWR_DEFAULT = 1.08
-    local JUMP_PWR_BOOSTED = 1.55
-    local JUMP_BALL_RADIUS = 20
-    local JUMP_COOLDOWN = 0.9
-    
-    local HEAD_BOUNCE_FORCE = 1.6
-    local HEAD_BOUNCE_COOLDOWN = 0.8
-    local HEAD_FEET_TOLERANCE = 1.0
-    local HEAD_HORIZ_TOLERANCE = 2.8
-    
-    local MANIP_RADIUS = 12
-    local MANIP_FORCE = 3.2
-    local MANIP_MAX_SPEED = 28
-    local MANIP_LIFT = 0.18
-    
-    local HITBOX_SIZE = Vector3.new(1.5, 1.5, 1.5)
-    local V3_ZERO = Vector3.zero
-    
-    local targetSizes = {
-        Vector3.new(0.9206262826919556, 1.617432713508606, 0.9134196639060974),
-        Vector3.new(1, 1.7, 1),
-        Vector3.new(0.92, 1.62, 0.91),
-    }
-    
-    local ARM_PARTS = {
-        "RightUpperArm", "RightLowerArm", "RightHand",
-        "LeftUpperArm", "LeftLowerArm", "LeftHand",
-        "Right Arm", "Left Arm",
-    }
-    
-    local cachedBalls = {}
-    local cachedArmParts = {}
-    local ballIsNearby = false
-    local nearestBall = nil
-    local originalSizes = {}
-    local originalCollide = {}
-    local activeHitboxes = {}
-    local isOnCooldown = false
-    local isJumpCooldown = false
-    local isHeadBounceCooldown = false
-    local isHolding = false
-    local isPulling = false
-    local jitterOn = false
-    local jitterPhase = false
-    
-    local hitboxConn, charConn, renderConn, pullConn, pullEndConn, jumpConn
-    
-    local function disconnectAll()
-        if hitboxConn then hitboxConn:Disconnect() end
-        if charConn then charConn:Disconnect() end
-        if renderConn then renderConn:Disconnect() end
-        if pullConn then pullConn:Disconnect() end
-        if pullEndConn then pullEndConn:Disconnect() end
-        if jumpConn then jumpConn:Disconnect() end
-    end
-    
-    local function isBallOwned(ball)
-        if not ball or not ball.Parent then return true end
-        for _, child in pairs(ball:GetChildren()) do
-            if child:IsA("WeldConstraint") or child:IsA("Weld") or child:IsA("Motor6D") then
-                return true
-            end
+    pcall(function()
+        local uis = UserInputService
+        local run = RunService
+        
+        local HIP_HEIGHT = 2.1
+        local HITBOX_RADIUS = 20
+        local COOLDOWN = 1.0
+        local BALL_RADIUS = 165
+        local BOOST_FORCE = 2.5
+        local MAX_HORIZ_SPEED = 18
+        local MAX_VERT_SPEED = 28
+        local SIZE_TOLERANCE = 0.15
+        local PULL_FORCE = 4.5
+        local PULL_PREDICT = 0.25
+        
+        local JUMP_PWR_DEFAULT = 1.08
+        local JUMP_PWR_BOOSTED = 1.55
+        local JUMP_BALL_RADIUS = 20
+        local JUMP_COOLDOWN = 0.9
+        
+        local HEAD_BOUNCE_FORCE = 1.6
+        local HEAD_BOUNCE_COOLDOWN = 0.8
+        local HEAD_FEET_TOLERANCE = 1.0
+        local HEAD_HORIZ_TOLERANCE = 2.8
+        
+        local MANIP_RADIUS = 12
+        local MANIP_FORCE = 3.2
+        local MANIP_MAX_SPEED = 28
+        
+        local HITBOX_SIZE = Vector3.new(1.5, 1.5, 1.5)
+        
+        local targetSizes = {
+            Vector3.new(0.9206262826919556, 1.617432713508606, 0.9134196639060974),
+            Vector3.new(1, 1.7, 1),
+            Vector3.new(0.92, 1.62, 0.91),
+        }
+        
+        local ARM_PARTS = {
+            "RightUpperArm", "RightLowerArm", "RightHand",
+            "LeftUpperArm", "LeftLowerArm", "LeftHand",
+            "Right Arm", "Left Arm",
+        }
+        
+        local cachedBalls = {}
+        local cachedArmParts = {}
+        local ballIsNearby = false
+        local nearestBall = nil
+        local originalSizes = {}
+        local originalCollide = {}
+        local activeHitboxes = {}
+        local isOnCooldown = false
+        local isJumpCooldown = false
+        local isHeadBounceCooldown = false
+        local isHolding = false
+        local isPulling = false
+        local jitterOn = false
+        local jitterPhase = false
+        
+        local hitboxConn, charConn, renderConn, pullConn, pullEndConn, jumpConn
+        
+        local function disconnectAll()
+            pcall(function() if hitboxConn then hitboxConn:Disconnect() end end)
+            pcall(function() if charConn then charConn:Disconnect() end end)
+            pcall(function() if renderConn then renderConn:Disconnect() end end)
+            pcall(function() if pullConn then pullConn:Disconnect() end end)
+            pcall(function() if pullEndConn then pullEndConn:Disconnect() end end)
+            pcall(function() if jumpConn then jumpConn:Disconnect() end end)
         end
-        for _, player in pairs(game.Players:GetPlayers()) do
-            if player.Character then
-                local root = player.Character:FindFirstChild("HumanoidRootPart")
-                if root and (root.Position - ball.Position).Magnitude < 3 then
-                    if (ball.AssemblyLinearVelocity - root.AssemblyLinearVelocity).Magnitude < 5 then
-                        return true
+        
+        local function isBallOwned(ball)
+            if not ball or not ball.Parent then return true end
+            for _, child in pairs(ball:GetChildren()) do
+                if child:IsA("WeldConstraint") or child:IsA("Weld") or child:IsA("Motor6D") then
+                    return true
+                end
+            end
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    local root = player.Character:FindFirstChild("HumanoidRootPart")
+                    if root and (root.Position - ball.Position).Magnitude < 3 then
+                        if (ball.AssemblyLinearVelocity - root.AssemblyLinearVelocity).Magnitude < 5 then
+                            return true
+                        end
                     end
                 end
             end
+            return false
         end
-        return false
-    end
-    
-    local overlapParams = OverlapParams.new()
-    overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-    
-    task.spawn(function()
-        while ballManipEnabled do
-            task.wait(0.15)
-            local char = plr.Character
-            if not char or not char.PrimaryPart then
+        
+        local overlapParams = OverlapParams.new()
+        overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+        
+        task.spawn(function()
+            while ballManipEnabled do
+                task.wait(0.15)
+                pcall(function()
+                    local char = plr.Character
+                    if not char or not char.PrimaryPart then
+                        ballIsNearby = false
+                        nearestBall = nil
+                        cachedBalls = {}
+                        return
+                    end
+                    
+                    local playerPos = char.PrimaryPart.Position
+                    local found = false
+                    local closest = nil
+                    local closestDist = math.huge
+                    local newCache = {}
+                    
+                    local parts = workspace:GetPartBoundsInRadius(playerPos, BALL_RADIUS, overlapParams)
+                    
+                    for _, obj in ipairs(parts) do
+                        local size = obj.Size
+                        for _, t in ipairs(targetSizes) do
+                            if math.abs(size.X - t.X) <= SIZE_TOLERANCE
+                            and math.abs(size.Y - t.Y) <= SIZE_TOLERANCE
+                            and math.abs(size.Z - t.Z) <= SIZE_TOLERANCE then
+                                table.insert(newCache, obj)
+                                if not isBallOwned(obj) then
+                                    local dist = (obj.Position - playerPos).Magnitude
+                                    found = true
+                                    if dist < closestDist then
+                                        closestDist = dist
+                                        closest = obj
+                                    end
+                                end
+                                break
+                            end
+                        end
+                    end
+                    
+                    cachedBalls = newCache
+                    ballIsNearby = found
+                    nearestBall = closest
+                end)
+            end
+        end)
+        
+        local function applyHitbox(hrp)
+            pcall(function()
+                if not hrp or not hrp:IsA("BasePart") then return end
+                if not originalSizes[hrp] then
+                    originalSizes[hrp] = hrp.Size
+                    originalCollide[hrp] = hrp.CanCollide
+                end
+                hrp.Size = HITBOX_SIZE
+                hrp.CanCollide = false
+            end)
+        end
+        
+        local function restoreHitbox(hrp)
+            pcall(function()
+                if hrp and hrp.Parent and originalSizes[hrp] then
+                    hrp.Size = originalSizes[hrp]
+                    hrp.CanCollide = originalCollide[hrp] or false
+                end
+                originalSizes[hrp] = nil
+                originalCollide[hrp] = nil
+                activeHitboxes[hrp] = nil
+            end)
+        end
+        
+        local function updateHitboxes()
+            pcall(function()
+                local myChar = plr.Character
+                if not myChar then return end
+                local myHRP = myChar:FindFirstChild("HumanoidRootPart")
+                if not myHRP then return end
+                local myPos = myHRP.Position
+                local valid = {}
+                
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= plr and player.Character then
+                        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp and hrp:IsDescendantOf(workspace) then
+                            if (myPos - hrp.Position).Magnitude <= HITBOX_RADIUS then
+                                valid[hrp] = true
+                                activeHitboxes[hrp] = true
+                                applyHitbox(hrp)
+                            end
+                        end
+                    end
+                end
+                
+                for hrp in pairs(activeHitboxes) do
+                    if not valid[hrp] or not hrp or not hrp.Parent then
+                        restoreHitbox(hrp)
+                    end
+                end
+            end)
+        end
+        
+        local function rebuildArmCache(char)
+            pcall(function()
+                cachedArmParts = {}
+                for _, name in ipairs(ARM_PARTS) do
+                    local part = char:FindFirstChild(name)
+                    if part and part:IsA("BasePart") then
+                        table.insert(cachedArmParts, part)
+                    end
+                end
+            end)
+        end
+        
+        local function disableArmCollision()
+            pcall(function()
+                for _, part in ipairs(cachedArmParts) do
+                    if part and part.Parent then
+                        part.CanCollide = false
+                    end
+                end
+            end)
+        end
+        
+        local function applyHorizPull(char, dt)
+            pcall(function()
+                if not nearestBall or not nearestBall.Parent then return end
+                if nearestBall.AssemblyLinearVelocity.Magnitude < 2 then return end
+                
+                local rootPart = char:FindFirstChild("HumanoidRootPart")
+                if not rootPart then return end
+                
+                local myPos = rootPart.Position
+                local ballPos = nearestBall.Position + nearestBall.AssemblyLinearVelocity * PULL_PREDICT
+                local diff = ballPos - myPos
+                local dist = diff.Magnitude
+                
+                if dist > BALL_RADIUS then return end
+                
+                local dirX = diff.X
+                local dirZ = diff.Z
+                local hMag = math.sqrt(dirX * dirX + dirZ * dirZ)
+                if hMag < 0.1 then return end
+                
+                local vel = rootPart.AssemblyLinearVelocity
+                if math.sqrt(vel.X * vel.X + vel.Z * vel.Z) > MAX_HORIZ_SPEED then return end
+                
+                local scale = math.clamp(dist / BALL_RADIUS, 0.15, 0.75)
+                local force = PULL_FORCE * 1.5 * scale * rootPart.AssemblyMass * dt * 60 / hMag
+                
+                rootPart:ApplyImpulse(Vector3.new(dirX * force, 0, dirZ * force))
+            end)
+        end
+        
+        local function manipulateBall(char, dt)
+            pcall(function()
+                if not nearestBall or not nearestBall.Parent then return end
+                
+                local rootPart = char:FindFirstChild("HumanoidRootPart")
+                if not rootPart then return end
+                
+                local handPart = char:FindFirstChild("RightHand")
+                    or char:FindFirstChild("Right Arm")
+                    or rootPart
+                
+                local myPos = handPart.Position
+                local ballPos = nearestBall.Position
+                local dist = (ballPos - myPos).Magnitude
+                
+                if dist > MANIP_RADIUS then return end
+                if nearestBall.AssemblyLinearVelocity.Magnitude > MANIP_MAX_SPEED then return end
+                
+                local toHand = myPos - ballPos
+                if toHand.Magnitude < 0.1 then return end
+                local dir = toHand.Unit
+                
+                local proxScale = 1 - math.clamp(dist / MANIP_RADIUS, 0, 1)
+                proxScale = proxScale * proxScale
+                
+                local ballVelY = nearestBall.AssemblyLinearVelocity.Y
+                local isGrounded = math.abs(ballVelY) < 1.0
+                
+                local impulseDir
+                if isGrounded then
+                    impulseDir = Vector3.new(dir.X, 2.2, dir.Z).Unit
+                else
+                    impulseDir = dir
+                end
+                
+                local force = MANIP_FORCE * 2.2 * proxScale * nearestBall.AssemblyMass * dt * 60
+                
+                nearestBall:ApplyImpulse(impulseDir * force)
+            end)
+        end
+        
+        local function tryHeadBounce(char)
+            pcall(function()
+                if isHeadBounceCooldown then return end
+                if not nearestBall or not nearestBall.Parent then return end
+                if not char or not char.PrimaryPart then return end
+                
+                local rootPart = char.PrimaryPart
+                local myPos = rootPart.Position
+                local feetY = myPos.Y - HIP_HEIGHT
+                
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= plr and player.Character then
+                        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            local headTopY = hrp.Position.Y + 1.5
+                            local dx = myPos.X - hrp.Position.X
+                            local dz = myPos.Z - hrp.Position.Z
+                            local horizDist = math.sqrt(dx*dx + dz*dz)
+                            
+                            if horizDist <= HEAD_HORIZ_TOLERANCE
+                            and math.abs(feetY - headTopY) <= HEAD_FEET_TOLERANCE then
+                                
+                                local dir = nearestBall.Position - myPos
+                                if dir.Magnitude < 0.1 then break end
+                                dir = dir.Unit
+                                
+                                dir = Vector3.new(dir.X, math.clamp(dir.Y, 0.1, 0.45), dir.Z).Unit
+                                
+                                isHeadBounceCooldown = true
+                                rootPart:ApplyImpulse(dir * HEAD_BOUNCE_FORCE * rootPart.AssemblyMass)
+                                task.delay(HEAD_BOUNCE_COOLDOWN, function()
+                                    isHeadBounceCooldown = false
+                                end)
+                                break
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        
+        local function tryHeadBoost(char)
+            pcall(function()
+                if not isHolding or isOnCooldown or not ballIsNearby then return end
+                if not char or not char.PrimaryPart then return end
+                
+                local rootPart = char.PrimaryPart
+                local myPos = rootPart.Position
+                local vel = rootPart.AssemblyLinearVelocity
+                
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.FloorMaterial ~= Enum.Material.Air then return end
+                
+                local onHead = false
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= plr and player.Character then
+                        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            local dx = myPos.X - hrp.Position.X
+                            local dz = myPos.Z - hrp.Position.Z
+                            if math.sqrt(dx*dx + dz*dz) <= 3.5 and myPos.Y >= hrp.Position.Y + 2 then
+                                onHead = true
+                                break
+                            end
+                        end
+                    end
+                end
+                
+                if not onHead or not nearestBall then return end
+                if math.sqrt(vel.X*vel.X + vel.Z*vel.Z) > MAX_HORIZ_SPEED then return end
+                if vel.Y > MAX_VERT_SPEED then return end
+                
+                local dir = nearestBall.Position - myPos
+                if dir.Magnitude < 0.1 then return end
+                dir = dir.Unit
+                dir = Vector3.new(dir.X, math.clamp(dir.Y, -0.3, 0.5), dir.Z).Unit
+                
+                isOnCooldown = true
+                rootPart:ApplyImpulse(dir * BOOST_FORCE * rootPart.AssemblyMass)
+                task.delay(COOLDOWN, function() isOnCooldown = false end)
+            end)
+        end
+        
+        jumpConn = uis.JumpRequest:Connect(function()
+            pcall(function()
+                if isJumpCooldown then return end
+                local char = plr.Character
+                if not char or not char.PrimaryPart then return end
+                
+                local rootPart = char.PrimaryPart
+                local vel = rootPart.AssemblyLinearVelocity
+                
+                local pwr = JUMP_PWR_DEFAULT
+                if nearestBall and nearestBall.Parent then
+                    local dist = (nearestBall.Position - rootPart.Position).Magnitude
+                    if dist <= JUMP_BALL_RADIUS then
+                        pwr = JUMP_PWR_BOOSTED
+                    end
+                end
+                
+                local jumpForce = math.clamp(pwr - vel.Y, 0, pwr)
+                rootPart:ApplyImpulse(Vector3.new(0, jumpForce, 0) * rootPart.AssemblyMass)
+                
+                isJumpCooldown = true
+                task.delay(JUMP_COOLDOWN, function() isJumpCooldown = false end)
+            end)
+        end)
+        
+        pullConn = uis.InputBegan:Connect(function(input, gameProcessed)
+            pcall(function()
+                local gp = input.UserInputType == Enum.UserInputType.Gamepad1
+                    or input.UserInputType == Enum.UserInputType.Gamepad2
+                if gameProcessed and not gp then return end
+                if input.KeyCode == Enum.KeyCode.DPadRight
+                or input.KeyCode == Enum.KeyCode.ButtonR1 then
+                    isHolding = true
+                    isPulling = true
+                    jitterOn = true
+                end
+            end)
+        end)
+        
+        pullEndConn = uis.InputEnded:Connect(function(input)
+            pcall(function()
+                if input.KeyCode == Enum.KeyCode.DPadRight
+                or input.KeyCode == Enum.KeyCode.ButtonR1 then
+                    isHolding = false
+                    jitterOn = false
+                    jitterPhase = false
+                end
+            end)
+        end)
+        
+        local hitboxTimer = 0
+        hitboxConn = run.PreSimulation:Connect(function(dt)
+            pcall(function()
+                if not ballManipEnabled then return end
+                hitboxTimer = hitboxTimer + dt
+                if hitboxTimer >= (1 / 30) then
+                    hitboxTimer = 0
+                    updateHitboxes()
+                end
+            end)
+        end)
+        
+        local jitterTimer = 0
+        renderConn = run.RenderStepped:Connect(function(dt)
+            pcall(function()
+                if not ballManipEnabled then return end
+                local char = plr.Character
+                if not char then return end
+                
+                if jitterOn and ballIsNearby then
+                    jitterTimer = jitterTimer + dt
+                    if jitterTimer >= 0.055 then
+                        jitterTimer = 0
+                        jitterPhase = not jitterPhase
+                    end
+                else
+                    jitterPhase = false
+                    jitterTimer = 0
+                end
+                
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                local ballAirborne = nearestBall
+                    and nearestBall.Parent
+                    and nearestBall.AssemblyLinearVelocity.Magnitude > 2
+                
+                isPulling = ballAirborne and hrp
+                    and (nearestBall.Position - hrp.Position).Magnitude <= BALL_RADIUS
+                    or false
+                
+                disableArmCollision()
+                applyHorizPull(char, dt)
+                manipulateBall(char, dt)
+                tryHeadBounce(char)
+                tryHeadBoost(char)
+            end)
+        end)
+        
+        local function applyHipHeight(char)
+            pcall(function()
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then hum.HipHeight = HIP_HEIGHT end
+            end)
+        end
+        
+        local function onCharacter(char)
+            pcall(function()
+                char:WaitForChild("HumanoidRootPart")
+                char:WaitForChild("Humanoid")
+                
+                for hrp in pairs(activeHitboxes) do
+                    originalSizes[hrp] = nil
+                    activeHitboxes[hrp] = nil
+                end
+                
+                isOnCooldown = false
+                isJumpCooldown = false
+                isHeadBounceCooldown = false
+                isHolding = false
+                isPulling = false
+                jitterOn = false
+                jitterPhase = false
                 ballIsNearby = false
                 nearestBall = nil
                 cachedBalls = {}
-                continue
-            end
-            
-            local playerPos = char.PrimaryPart.Position
-            local found = false
-            local closest = nil
-            local closestDist = math.huge
-            local newCache = {}
-            
-            local parts = workspace:GetPartBoundsInRadius(playerPos, BALL_RADIUS, overlapParams)
-            
-            for _, obj in ipairs(parts) do
-                local size = obj.Size
-                for _, t in ipairs(targetSizes) do
-                    if math.abs(size.X - t.X) <= SIZE_TOLERANCE
-                    and math.abs(size.Y - t.Y) <= SIZE_TOLERANCE
-                    and math.abs(size.Z - t.Z) <= SIZE_TOLERANCE then
-                        table.insert(newCache, obj)
-                        if not isBallOwned(obj) then
-                            local dist = (obj.Position - playerPos).Magnitude
-                            found = true
-                            if dist < closestDist then
-                                closestDist = dist
-                                closest = obj
-                            end
-                        end
-                        break
-                    end
-                end
-            end
-            
-            cachedBalls = newCache
-            ballIsNearby = found
-            nearestBall = closest
+                
+                applyHipHeight(char)
+                rebuildArmCache(char)
+                
+                task.wait(0.5)
+                disableArmCollision()
+            end)
         end
+        
+        charConn = plr.CharacterAdded:Connect(onCharacter)
+        if plr.Character then
+            task.spawn(function() onCharacter(plr.Character) end)
+        end
+        
+        table.insert(ballManipConnections, hitboxConn)
+        table.insert(ballManipConnections, charConn)
+        table.insert(ballManipConnections, renderConn)
+        table.insert(ballManipConnections, pullConn)
+        table.insert(ballManipConnections, pullEndConn)
+        table.insert(ballManipConnections, jumpConn)
     end)
-    
-    local function applyHitbox(hrp)
-        if not hrp or not hrp:IsA("BasePart") then return end
-        if not originalSizes[hrp] then
-            originalSizes[hrp] = hrp.Size
-            originalCollide[hrp] = hrp.CanCollide
-        end
-        hrp.Size = HITBOX_SIZE
-        hrp.CanCollide = false
-    end
-    
-    local function restoreHitbox(hrp)
-        if hrp and hrp.Parent and originalSizes[hrp] then
-            hrp.Size = originalSizes[hrp]
-            hrp.CanCollide = originalCollide[hrp] or false
-        end
-        originalSizes[hrp] = nil
-        originalCollide[hrp] = nil
-        activeHitboxes[hrp] = nil
-    end
-    
-    local function updateHitboxes()
-        local myChar = plr.Character
-        if not myChar then return end
-        local myHRP = myChar:FindFirstChild("HumanoidRootPart")
-        if not myHRP then return end
-        local myPos = myHRP.Position
-        local valid = {}
-        
-        for _, player in pairs(game.Players:GetPlayers()) do
-            if player ~= plr and player.Character then
-                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and hrp:IsDescendantOf(workspace) then
-                    if (myPos - hrp.Position).Magnitude <= HITBOX_RADIUS then
-                        valid[hrp] = true
-                        activeHitboxes[hrp] = true
-                        applyHitbox(hrp)
-                    end
-                end
-            end
-        end
-        
-        for hrp in pairs(activeHitboxes) do
-            if not valid[hrp] or not hrp or not hrp.Parent then
-                restoreHitbox(hrp)
-            end
-        end
-    end
-    
-    local function rebuildArmCache(char)
-        cachedArmParts = {}
-        for _, name in ipairs(ARM_PARTS) do
-            local part = char:FindFirstChild(name)
-            if part and part:IsA("BasePart") then
-                table.insert(cachedArmParts, part)
-            end
-        end
-    end
-    
-    local function disableArmCollision()
-        for _, part in ipairs(cachedArmParts) do
-            if part and part.Parent then
-                part.CanCollide = false
-            end
-        end
-    end
-    
-    local function applyHorizPull(char, dt)
-        if not nearestBall or not nearestBall.Parent then return end
-        if nearestBall.AssemblyLinearVelocity.Magnitude < 2 then return end
-        
-        local rootPart = char:FindFirstChild("HumanoidRootPart")
-        if not rootPart then return end
-        
-        local myPos = rootPart.Position
-        local ballPos = nearestBall.Position + nearestBall.AssemblyLinearVelocity * PULL_PREDICT
-        local diff = ballPos - myPos
-        local dist = diff.Magnitude
-        
-        if dist > BALL_RADIUS then return end
-        
-        local dirX = diff.X
-        local dirZ = diff.Z
-        local hMag = math.sqrt(dirX * dirX + dirZ * dirZ)
-        if hMag < 0.1 then return end
-        
-        local vel = rootPart.AssemblyLinearVelocity
-        if math.sqrt(vel.X * vel.X + vel.Z * vel.Z) > MAX_HORIZ_SPEED then return end
-        
-        local scale = math.clamp(dist / BALL_RADIUS, 0.15, 0.75)
-        local force = PULL_FORCE * 1.5 * scale * rootPart.AssemblyMass * dt * 60 / hMag
-        
-        rootPart:ApplyImpulse(Vector3.new(dirX * force, 0, dirZ * force))
-    end
-    
-    local function manipulateBall(char, dt)
-        if not nearestBall or not nearestBall.Parent then return end
-        
-        local rootPart = char:FindFirstChild("HumanoidRootPart")
-        if not rootPart then return end
-        
-        local handPart = char:FindFirstChild("RightHand")
-            or char:FindFirstChild("Right Arm")
-            or rootPart
-        
-        local myPos = handPart.Position
-        local ballPos = nearestBall.Position
-        local dist = (ballPos - myPos).Magnitude
-        
-        if dist > MANIP_RADIUS then return end
-        if nearestBall.AssemblyLinearVelocity.Magnitude > MANIP_MAX_SPEED then return end
-        
-        local toHand = myPos - ballPos
-        if toHand.Magnitude < 0.1 then return end
-        local dir = toHand.Unit
-        
-        local proxScale = 1 - math.clamp(dist / MANIP_RADIUS, 0, 1)
-        proxScale = proxScale * proxScale
-        
-        local ballVelY = nearestBall.AssemblyLinearVelocity.Y
-        local isGrounded = math.abs(ballVelY) < 1.0
-        
-        local impulseDir
-        if isGrounded then
-            impulseDir = Vector3.new(dir.X, 2.2, dir.Z).Unit
-        else
-            impulseDir = dir
-        end
-        
-        local force = MANIP_FORCE * 2.2 * proxScale * nearestBall.AssemblyMass * dt * 60
-        
-        nearestBall:ApplyImpulse(impulseDir * force)
-    end
-    
-    local function tryHeadBounce(char)
-        if isHeadBounceCooldown then return end
-        if not nearestBall or not nearestBall.Parent then return end
-        if not char or not char.PrimaryPart then return end
-        
-        local rootPart = char.PrimaryPart
-        local myPos = rootPart.Position
-        local feetY = myPos.Y - HIP_HEIGHT
-        
-        for _, player in pairs(game.Players:GetPlayers()) do
-            if player ~= plr and player.Character then
-                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local headTopY = hrp.Position.Y + 1.5
-                    local dx = myPos.X - hrp.Position.X
-                    local dz = myPos.Z - hrp.Position.Z
-                    local horizDist = math.sqrt(dx*dx + dz*dz)
-                    
-                    if horizDist <= HEAD_HORIZ_TOLERANCE
-                    and math.abs(feetY - headTopY) <= HEAD_FEET_TOLERANCE then
-                        
-                        local dir = nearestBall.Position - myPos
-                        if dir.Magnitude < 0.1 then break end
-                        dir = dir.Unit
-                        
-                        dir = Vector3.new(dir.X, math.clamp(dir.Y, 0.1, 0.45), dir.Z).Unit
-                        
-                        isHeadBounceCooldown = true
-                        rootPart:ApplyImpulse(dir * HEAD_BOUNCE_FORCE * rootPart.AssemblyMass)
-                        task.delay(HEAD_BOUNCE_COOLDOWN, function()
-                            isHeadBounceCooldown = false
-                        end)
-                        break
-                    end
-                end
-            end
-        end
-    end
-    
-    local function tryHeadBoost(char)
-        if not isHolding or isOnCooldown or not ballIsNearby then return end
-        if not char or not char.PrimaryPart then return end
-        
-        local rootPart = char.PrimaryPart
-        local myPos = rootPart.Position
-        local vel = rootPart.AssemblyLinearVelocity
-        
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum and hum.FloorMaterial ~= Enum.Material.Air then return end
-        
-        local onHead = false
-        for _, player in pairs(game.Players:GetPlayers()) do
-            if player ~= plr and player.Character then
-                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local dx = myPos.X - hrp.Position.X
-                    local dz = myPos.Z - hrp.Position.Z
-                    if math.sqrt(dx*dx + dz*dz) <= 3.5 and myPos.Y >= hrp.Position.Y + 2 then
-                        onHead = true
-                        break
-                    end
-                end
-            end
-        end
-        
-        if not onHead or not nearestBall then return end
-        if math.sqrt(vel.X*vel.X + vel.Z*vel.Z) > MAX_HORIZ_SPEED then return end
-        if vel.Y > MAX_VERT_SPEED then return end
-        
-        local dir = nearestBall.Position - myPos
-        if dir.Magnitude < 0.1 then return end
-        dir = dir.Unit
-        dir = Vector3.new(dir.X, math.clamp(dir.Y, -0.3, 0.5), dir.Z).Unit
-        
-        isOnCooldown = true
-        rootPart:ApplyImpulse(dir * BOOST_FORCE * rootPart.AssemblyMass)
-        task.delay(COOLDOWN, function() isOnCooldown = false end)
-    end
-    
-    jumpConn = uis.JumpRequest:Connect(function()
-        if isJumpCooldown then return end
-        local char = plr.Character
-        if not char or not char.PrimaryPart then return end
-        
-        local rootPart = char.PrimaryPart
-        local vel = rootPart.AssemblyLinearVelocity
-        
-        local pwr = JUMP_PWR_DEFAULT
-        if nearestBall and nearestBall.Parent then
-            local dist = (nearestBall.Position - rootPart.Position).Magnitude
-            if dist <= JUMP_BALL_RADIUS then
-                pwr = JUMP_PWR_BOOSTED
-            end
-        end
-        
-        local jumpForce = math.clamp(pwr - vel.Y, 0, pwr)
-        rootPart:ApplyImpulse(Vector3.new(0, jumpForce, 0) * rootPart.AssemblyMass)
-        
-        isJumpCooldown = true
-        task.delay(JUMP_COOLDOWN, function() isJumpCooldown = false end)
-    end)
-    
-    pullConn = uis.InputBegan:Connect(function(input, gameProcessed)
-        local gp = input.UserInputType == Enum.UserInputType.Gamepad1
-            or input.UserInputType == Enum.UserInputType.Gamepad2
-        if gameProcessed and not gp then return end
-        if input.KeyCode == Enum.KeyCode.DPadRight
-        or input.KeyCode == Enum.KeyCode.ButtonR1 then
-            isHolding = true
-            isPulling = true
-            jitterOn = true
-        end
-    end)
-    
-    pullEndConn = uis.InputEnded:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.DPadRight
-        or input.KeyCode == Enum.KeyCode.ButtonR1 then
-            isHolding = false
-            jitterOn = false
-            jitterPhase = false
-        end
-    end)
-    
-    local hitboxTimer = 0
-    hitboxConn = run.PreSimulation:Connect(function(dt)
-        if not ballManipEnabled then return end
-        hitboxTimer = hitboxTimer + dt
-        if hitboxTimer >= (1 / 30) then
-            hitboxTimer = 0
-            updateHitboxes()
-        end
-    end)
-    
-    local jitterTimer = 0
-    renderConn = run.RenderStepped:Connect(function(dt)
-        if not ballManipEnabled then return end
-        local char = plr.Character
-        if not char then return end
-        
-        if jitterOn and ballIsNearby then
-            jitterTimer = jitterTimer + dt
-            if jitterTimer >= 0.055 then
-                jitterTimer = 0
-                jitterPhase = not jitterPhase
-            end
-        else
-            jitterPhase = false
-            jitterTimer = 0
-        end
-        
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local ballAirborne = nearestBall
-            and nearestBall.Parent
-            and nearestBall.AssemblyLinearVelocity.Magnitude > 2
-        
-        isPulling = ballAirborne and hrp
-            and (nearestBall.Position - hrp.Position).Magnitude <= BALL_RADIUS
-            or false
-        
-        disableArmCollision()
-        applyHorizPull(char, dt)
-        manipulateBall(char, dt)
-        tryHeadBounce(char)
-        tryHeadBoost(char)
-    end)
-    
-    local function applyHipHeight(char)
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then pcall(function() hum.HipHeight = HIP_HEIGHT end) end
-    end
-    
-    local function onCharacter(char)
-        char:WaitForChild("HumanoidRootPart")
-        char:WaitForChild("Humanoid")
-        
-        for hrp in pairs(activeHitboxes) do
-            originalSizes[hrp] = nil
-            activeHitboxes[hrp] = nil
-        end
-        
-        isOnCooldown = false
-        isJumpCooldown = false
-        isHeadBounceCooldown = false
-        isHolding = false
-        isPulling = false
-        jitterOn = false
-        jitterPhase = false
-        ballIsNearby = false
-        nearestBall = nil
-        cachedBalls = {}
-        
-        applyHipHeight(char)
-        rebuildArmCache(char)
-        
-        task.wait(0.5)
-        disableArmCollision()
-    end
-    
-    charConn = plr.CharacterAdded:Connect(onCharacter)
-    if plr.Character then
-        task.spawn(function() onCharacter(plr.Character) end)
-    end
-    
-    table.insert(ballManipConnections, hitboxConn)
-    table.insert(ballManipConnections, charConn)
-    table.insert(ballManipConnections, renderConn)
-    table.insert(ballManipConnections, pullConn)
-    table.insert(ballManipConnections, pullEndConn)
-    table.insert(ballManipConnections, jumpConn)
 end
 
 local function disableBallManipulation()
-    for _, conn in ipairs(ballManipConnections) do
-        if conn then
-            conn:Disconnect()
+    pcall(function()
+        for _, conn in ipairs(ballManipConnections) do
+            if conn then
+                conn:Disconnect()
+            end
         end
-    end
-    ballManipConnections = {}
+        ballManipConnections = {}
+    end)
 end
 
 local MESH_ITEMS = {
